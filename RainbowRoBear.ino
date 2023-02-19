@@ -23,22 +23,9 @@ const char passphrase[] = SECRET_PSK;
 #include <FastLED.h>
 #include <MIDI.h>
 
-MIDI_CREATE_DEFAULT_INSTANCE();
+MIDI_CREATE_INSTANCE(HardwareSerial, Serial2, MIDI); // Feather32 uses Serial2
 
 FASTLED_USING_NAMESPACE
-
-// FastLED "100-lines-of-code" demo reel, showing just a few 
-// of the kinds of animation patterns you can quickly and easily 
-// compose using FastLED.  
-//
-// This example also shows one easy way to define multiple 
-// animations patterns and have them automatically rotate.
-//
-// -Mark Kriegsman, December 2014
-
-#if defined(FASTLED_VERSION) && (FASTLED_VERSION < 3001000)
-#warning "Requires FastLED 3.1 or later; check github for latest code."
-#endif
 
 #define DATA_PIN    23 // https://learn.adafruit.com/assets/111179
 #define LED_TYPE    WS2811
@@ -46,7 +33,7 @@ FASTLED_USING_NAMESPACE
 #define NUM_LEDS    40
 CRGB leds[NUM_LEDS];
 
-#define BRIGHTNESS         10
+#define BRIGHTNESS         100
 #define FRAMES_PER_SECOND  120
 
 WebServer server(80);
@@ -56,7 +43,7 @@ void setup() {
   delay(3000); // 3 second delay for recovery
 
   WiFi.mode(WIFI_STA);
-  Serial.printf("Connecting to %s ", SECRET_SSID);
+//  Serial.printf("Connecting to %s ", SECRET_SSID);
 
   if (passphrase != NULL)
     WiFi.begin(ssid, passphrase);
@@ -65,10 +52,13 @@ void setup() {
   Serial.println("");
 
   // Wait for connection
-  while (WiFi.status() != WL_CONNECTED) {
-    delay(500);
-    Serial.print(".");
-  }
+  int sanity = 0;
+//  while (WiFi.status() != WL_CONNECTED) {
+//    delay(500);
+//    Serial.print(".");
+//      sanity++;
+//      if(sanity > 20) break;
+//  }
   Serial.println("");
   Serial.print("Connected to ");
   Serial.println(ssid);
@@ -106,26 +96,16 @@ void setup() {
 }
 
 
-// List of patterns to cycle through.  Each is defined as a separate function below.
-typedef void (*SimplePatternList[])();
-SimplePatternList gPatterns = { rainbow, confetti, sinelon, juggle, bpm };
 
-uint8_t gCurrentPatternNumber = 0; // Index number of which pattern is current
 uint8_t gHue = 0; // rotating "base color" used by many of the patterns
   
 void loop()
 {
-  // Call the current pattern function once, updating the 'leds' array
-  gPatterns[gCurrentPatternNumber]();
 
   // send the 'leds' array out to the actual LED strip
   FastLED.show();  
   // insert a delay to keep the framerate modest
-  FastLED.delay(1000/FRAMES_PER_SECOND); 
-
-  // do some periodic updates
-  EVERY_N_MILLISECONDS( 20 ) { gHue++; } // slowly cycle the "base color" through the rainbow
-  EVERY_N_SECONDS( 10 ) { nextPattern(); } // change patterns periodically
+//  FastLED.delay(1000/FRAMES_PER_SECOND); 
 
 
   // Call MIDI.read the fastest you can for real-time performance.
@@ -135,6 +115,10 @@ void loop()
   // if they are bound to a Callback function.
   // The attached method will be called automatically
   // when the corresponding message has been received.
+
+  EVERY_N_MILLISECONDS( 5 ) {
+    fadeToBlackBy(leds, NUM_LEDS, 1);
+  }
 }
 
 // -----------------------------------------------------------------------------
@@ -152,6 +136,16 @@ void handleNoteOn(byte channel, byte pitch, byte velocity)
     // otherwise it would slow down the loop() and have a bad impact
     // on real-time performance.
     Serial.printf("handleNoteOn channel=%s pitch=%s velocity=%s\n", (String) channel, (String) pitch, (String) velocity);
+
+    // Turn on the first LED Red when any note pressed
+//    leds[0] = CRGB::Red;
+
+    // Light up all the LEDs using pitch=hue,value=velocity
+//    fill_solid(leds, NUM_LEDS, CHSV(map(pitch, 21, 108, 0, 255), 255, map(velocity, 0, 127, 0, 255)));
+
+    // Use map of the range of pitch values of piano to the which LED
+    // Create a colour using HueSaturationValue (aka brightness) using pitch=hue,value=velocity
+    leds[map(pitch, 21, 108, 0, (NUM_LEDS - 1))] = CHSV(map(pitch, 0, 127, 0, 255), 255, map(velocity, 0, 127, 0, 255));
 }
 
 void handleNoteOff(byte channel, byte pitch, byte velocity)
@@ -159,30 +153,14 @@ void handleNoteOff(byte channel, byte pitch, byte velocity)
     // Do something when the note is released.
     // Note that NoteOn messages with 0 velocity are interpreted as NoteOffs.
    Serial.printf("handleNoteOff channel=%s pitch=%s velocity=%s\n", (String) channel, (String) pitch, (String) velocity);
+//   leds[0] = CRGB::Black;
+  // Turn the note you released black
+//   leds[map(pitch, 21, 108, 0, (NUM_LEDS - 1))] = CRGB::Black;
 }
 
 // -----------------------------------------------------------------------------
 
 #define ARRAY_SIZE(A) (sizeof(A) / sizeof((A)[0]))
-
-void nextPattern()
-{
-  // add one to the current pattern number, and wrap around at the end
-  gCurrentPatternNumber = (gCurrentPatternNumber + 1) % ARRAY_SIZE( gPatterns);
-}
-
-void rainbow() 
-{
-  // FastLED's built-in rainbow generator
-  fill_rainbow( leds, NUM_LEDS, gHue, 7);
-}
-
-void rainbowWithGlitter() 
-{
-  // built-in FastLED rainbow, plus some random sparkly glitter
-  rainbow();
-  addGlitter(80);
-}
 
 void addGlitter( fract8 chanceOfGlitter) 
 {
@@ -191,21 +169,6 @@ void addGlitter( fract8 chanceOfGlitter)
   }
 }
 
-void confetti() 
-{
-  // random colored speckles that blink in and fade smoothly
-  fadeToBlackBy( leds, NUM_LEDS, 10);
-  int pos = random16(NUM_LEDS);
-  leds[pos] += CHSV( gHue + random8(64), 200, 255);
-}
-
-void sinelon()
-{
-  // a colored dot sweeping back and forth, with fading trails
-  fadeToBlackBy( leds, NUM_LEDS, 20);
-  int pos = beatsin16( 13, 0, NUM_LEDS-1 );
-  leds[pos] += CHSV( gHue, 255, 192);
-}
 
 void bpm()
 {
@@ -217,14 +180,3 @@ void bpm()
     leds[i] = ColorFromPalette(palette, gHue+(i*2), beat-gHue+(i*10));
   }
 }
-
-void juggle() {
-  // eight colored dots, weaving in and out of sync with each other
-  fadeToBlackBy( leds, NUM_LEDS, 20);
-  byte dothue = 0;
-  for( int i = 0; i < 8; i++) {
-    leds[beatsin16( i+7, 0, NUM_LEDS-1 )] |= CHSV(dothue, 200, 255);
-    dothue += 32;
-  }
-}
-
